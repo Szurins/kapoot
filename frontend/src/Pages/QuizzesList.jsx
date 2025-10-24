@@ -1,6 +1,9 @@
 import React from "react";
 import axios from "axios";
 import { useEffect, useState } from "react";
+import Navbar from "../Components/Navbar";
+import Footer from "../Components/Footer";
+import QuizzCard from "../Components/QuizzCard";
 
 const QuizzesList = () => {
   let [quizzes, setQuizzes] = useState([]);
@@ -12,30 +15,21 @@ const QuizzesList = () => {
     getQuizzesFromApi();
   }, []);
   return (
-    <div>
-      {quizzes.map((quiz) => {
-        return (
-          <div key={quiz.id}>
-            <h1 className="text-red-500 font-extrabold text-3xl">
-              {quiz.name}
-            </h1>
-            <ol>
-              {quiz.questions.map((question) => {
-                return (
-                  <div key={question.id}>
-                    <li>{question.question}</li>
-                    <ul>
-                      {question.answers.map((answser) => {
-                        return <li key={answser.id}>{answser.answer}</li>;
-                      })}
-                    </ul>
-                  </div>
-                );
-              })}
-            </ol>
-          </div>
-        );
-      })}
+    <div className="flex flex-col justify-between h-screen bg-linear-to-r from-gray-700 to-gray-900">
+      <Navbar />
+      <div className="grid grid-cols-12 h-full p-5 overflow-y-auto gap-10">
+        {quizzes.map((quiz) => {
+          return (
+            <QuizzCard
+              key={quiz.id}
+              id={quiz.id}
+              title={quiz.name}
+              description={quiz.description}
+            />
+          );
+        })}
+      </div>
+      <Footer />
     </div>
   );
 };

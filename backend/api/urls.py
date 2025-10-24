@@ -4,6 +4,7 @@ from . import views
 
 urlpatterns = [
     path("quizzes/", view=views.QuizzesListCreateView.as_view()),
+    path("quizzes/<int:id>", view=views.QuizRetrieveView.as_view()),
     path(
         "quizzes/<int:quiz_id>/questions/", view=views.QuestionsListCreateView.as_view()
     ),

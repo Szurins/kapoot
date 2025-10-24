@@ -8,6 +8,12 @@ class QuizzesListCreateView(generics.ListCreateAPIView):
     serializer_class = serializers.QuizzesSerializer
 
 
+class QuizRetrieveView(generics.RetrieveAPIView):
+    queryset = models.Quizzes.objects.all()
+    serializer_class = serializers.QuizzesSerializer
+    lookup_field = "id"
+
+
 class QuestionsListCreateView(generics.ListCreateAPIView):
     serializer_class = serializers.QuestionSerializer
 
