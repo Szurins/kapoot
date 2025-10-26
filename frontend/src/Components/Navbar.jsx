@@ -10,6 +10,7 @@ const Navbar = () => {
         </a>
       </div>
       <div className="flex flex-row gap-20 items-center mr-10 text-2xl">
+        <a href="/joinQuiz">Join quiz!</a>
         <a href="/quizzes">Quizzes</a>
         <a href="#">Log in</a>
       </div>

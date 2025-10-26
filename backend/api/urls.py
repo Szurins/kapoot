@@ -12,4 +12,5 @@ urlpatterns = [
         "quizzes/<int:quiz_id>/questions/<int:question_id>/answer/",
         view=views.AnswersListCreateView.as_view(),
     ),
+    path("create-room/<int:quiz_id>/", views.create_room),
 ]

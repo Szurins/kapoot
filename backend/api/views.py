@@ -1,6 +1,16 @@
 from rest_framework import generics
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
 
 from . import models, serializers
+
+
+@api_view(["POST"])
+def create_room(request, quiz_id):
+    quiz = models.Quizzes.objects.get(id=quiz_id)
+    code = models.generate_room_code()
+    room = models.Room.objects.create(quiz=quiz, code=code)
+    return Response({"room_code": code})
 
 
 class QuizzesListCreateView(generics.ListCreateAPIView):
@@ -35,4 +45,7 @@ class AnswersListCreateView(generics.ListCreateAPIView):
 
     def perform_create(self, serializer):
         question = models.Questions.objects.get(id=self.kwargs["question_id"])
+        serializer.save(question_id=question)
+        serializer.save(question_id=question)
+        serializer.save(question_id=question)
         serializer.save(question_id=question)
