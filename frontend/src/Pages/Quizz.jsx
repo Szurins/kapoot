@@ -17,7 +17,7 @@ function Quiz() {
   const socketRef = useRef(null);
   const timerRef = useRef(null);
 
-  const colors = ["bg-red-500", "bg-blue-500", "bg-green-500", "bg-yellow-500"];
+  const colors = ["bg-red-500 hover:bg-red-600", "bg-blue-500 hover:bg-blue-600", "bg-green-500 hover:bg-green-700", "bg-yellow-500 hover:bg-yellow-700"];
 
   // Fetch quiz data
   useEffect(() => {
@@ -41,8 +41,6 @@ function Quiz() {
       const ws = new WebSocket(`ws://127.0.0.1:8000/ws/quiz/${code}/?host=true`);
       socketRef.current = ws;
 
-      ws.onopen = () => console.log("Connected as host to room:", code);
-
       ws.onmessage = (event) => {
         const data = JSON.parse(event.data);
 
@@ -56,17 +54,20 @@ function Quiz() {
         }
 
         if (data.type === "answer_selected") {
-          setPlayerAnswers(prev => ({ ...prev, [data.player]: data.correct }));
+          setPlayerAnswers(prev => ({ ...prev, [data.player]: data.is_correct, points: data.points }));
+          console.log("Answer selected:", data);
         }
+
 
         if (data.type === "question_end") {
           setQuestionResults(data.results);
+          console.log(data);
+
           clearInterval(timerRef.current);
           setTimeLeft(0);
         }
       };
 
-      ws.onclose = () => console.log("WebSocket disconnected");
     };
 
     createRoom();
@@ -99,13 +100,37 @@ function Quiz() {
       })),
       time_limit: 10,
     };
-
     socketRef.current.send(JSON.stringify({ action: "start_quiz", question_data: payload }));
     setCurrentQuestion(payload);
     setStarted(true);
     setRoomCode("");
     startTimer(10);
   };
+
+  const handleNextQuestion = () => {
+    if (!socketRef.current) return;
+
+    // Find the next question based on currentQuestion index
+    const currentIndex = quiz.questions.findIndex(q => q.question === currentQuestion.question);
+
+    const question = quiz.questions[currentIndex + 1];
+    const payload = {
+      question: question?.question || "No question defined",
+      answers: question.answers.map((a, idx) => ({
+        id: a.id,
+        answer: a.answer,
+        colorClass: colors[idx % colors.length],
+        is_correct: a.is_correct,
+      })),
+      time_limit: 10,
+    };
+    socketRef.current.send(JSON.stringify({ action: "start_quiz", question_data: payload }));
+    setCurrentQuestion(payload);
+    setStarted(true);
+    setRoomCode("");
+    startTimer(10);
+  };
+
 
   return (
     <div className="flex flex-col justify-between min-h-screen bg-gradient-to-r from-gray-700 to-gray-900 text-white">
@@ -125,11 +150,13 @@ function Quiz() {
         {!started && (
           <button
             onClick={startQuiz}
-            className="px-6 py-2 rounded bg-green-600 hover:bg-green-700"
+            className="px-6 py-2 rounded bg-green-600 hover:bg-green-700 hover:pointer disabled:bg-gray-600 hover:cursor-pointer"
+            disabled={players === 0} // disable if no players
           >
             Start Quiz
           </button>
         )}
+
 
         {started && currentQuestion && (
           <div className="mt-4 w-96">
@@ -157,14 +184,22 @@ function Quiz() {
             {questionResults && (
               <div className="mt-4 p-4 border border-gray-500 rounded bg-gray-800">
                 <p className="font-bold text-lg mb-2">Results:</p>
-                {Object.entries(questionResults).map(([player, correct], idx) => (
-                  <p key={idx} className={correct ? "text-green-400" : "text-red-400"}>
-                    {player}: {correct ? "Correct" : "Wrong"}
+                {Object.entries(questionResults).map(([player, result], idx) => (
+                  <p key={idx} className={result.correct ? "text-green-400" : "text-red-400"}>
+                    {player}: {result.points} pts
                   </p>
                 ))}
                 <p className="mt-2 font-bold">
                   Correct Answers: {Object.values(questionResults).filter(v => v).length} / {players}
                 </p>
+
+                {/* Next Question Button */}
+                <button
+                  onClick={() => handleNextQuestion()}
+                  className="mt-4 px-4 py-2 rounded bg-blue-600 hover:bg-blue-700"
+                >
+                  Next Question
+                </button>
               </div>
             )}
           </div>

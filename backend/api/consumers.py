@@ -4,107 +4,84 @@ from channels.generic.websocket import AsyncWebsocketConsumer
 
 
 class QuizRoomConsumer(AsyncWebsocketConsumer):
-    rooms_players = {}  # channel_name set per room
-    rooms_answers = {}  # player_name -> answer_id per room
-    rooms_host = {}  # host channel per room
+    # Static storage for simplicity; in production, consider DB/cache
+    rooms_players = {}  # room_name -> set of player names
+    rooms_answers = {}  # room_name -> { player_name: {answer_id, points} }
 
     async def connect(self):
-        self.room_code = self.scope["url_route"]["kwargs"]["room_code"]
-        self.room_group_name = f"quiz_{self.room_code}"
-        self.is_host = self.scope["query_string"].decode("utf-8") == "host=true"
+        self.room_group_name = self.scope["url_route"]["kwargs"]["room_code"]
 
-        if self.room_group_name not in QuizRoomConsumer.rooms_players:
-            QuizRoomConsumer.rooms_players[self.room_group_name] = set()
-            QuizRoomConsumer.rooms_answers[self.room_group_name] = {}
-
-        if self.is_host:
-            QuizRoomConsumer.rooms_host[self.room_group_name] = self.channel_name
-        else:
-            QuizRoomConsumer.rooms_players[self.room_group_name].add(self.channel_name)
-
+        # Join room group
         await self.channel_layer.group_add(self.room_group_name, self.channel_name)
         await self.accept()
 
-        # Broadcast player count excluding host
-        await self.channel_layer.group_send(
-            self.room_group_name,
-            {
-                "type": "player_count_update",
-                "count": len(QuizRoomConsumer.rooms_players[self.room_group_name]),
-            },
-        )
+        # Initialize room data if needed
+        if self.room_group_name not in self.rooms_players:
+            self.rooms_players[self.room_group_name] = set()
+        if self.room_group_name not in self.rooms_answers:
+            self.rooms_answers[self.room_group_name] = {}
 
     async def disconnect(self, close_code):
-        if self.is_host:
-            QuizRoomConsumer.rooms_host.pop(self.room_group_name, None)
-        else:
-            QuizRoomConsumer.rooms_players[self.room_group_name].discard(
-                self.channel_name
-            )
-            QuizRoomConsumer.rooms_answers[self.room_group_name].pop(
-                self.channel_name, None
-            )
-
+        # Leave room group
         await self.channel_layer.group_discard(self.room_group_name, self.channel_name)
-
-        # Broadcast updated player count
-        await self.channel_layer.group_send(
-            self.room_group_name,
-            {
-                "type": "player_count_update",
-                "count": len(QuizRoomConsumer.rooms_players[self.room_group_name]),
-            },
-        )
 
     async def receive(self, text_data):
         data = json.loads(text_data)
         action = data.get("action")
 
-        if action == "start_quiz":
-            question_data = data.get("question_data")
-            colors = ["red", "blue", "green", "yellow"]
-            for i, ans in enumerate(question_data["answers"]):
-                ans["color"] = colors[i % len(colors)]
+        if action == "join_room":
+            player = data.get("player")
+            self.rooms_players[self.room_group_name].add(player)
 
-            # Reset answers for new question
-            QuizRoomConsumer.rooms_answers[self.room_group_name] = {}
-
+            # Notify all clients about player count
             await self.channel_layer.group_send(
                 self.room_group_name,
-                {"type": "question_update", "payload": question_data},
+                {
+                    "type": "player_count_update",
+                    "count": len(self.rooms_players[self.room_group_name]),
+                },
             )
 
         elif action == "answer_selected":
             player = data.get("player")
             answer_id = data.get("answer_id")
-            # save player answer
-            QuizRoomConsumer.rooms_answers[self.room_group_name][player] = answer_id
+            points = data.get("points", 0)
+
+            # Save player's answer and points
+            self.rooms_answers.setdefault(self.room_group_name, {})
+            self.rooms_answers[self.room_group_name][player] = {
+                "answer_id": answer_id,
+                "points": points,
+            }
 
             # Check if all players have answered
-            num_players = len(QuizRoomConsumer.rooms_players[self.room_group_name])
-            num_answers = len(QuizRoomConsumer.rooms_answers[self.room_group_name])
+            num_players = len(self.rooms_players.get(self.room_group_name, {}))
+            num_answers = len(self.rooms_answers[self.room_group_name])
             if num_players > 0 and num_answers >= num_players:
                 # Prepare results
-                question_answers = self.scope.get(
-                    "question_answers", {}
-                )  # optional: map of correct answers
+                question_answers = self.scope.get("question_answers", {})  # optional
                 results = {}
-                # if question_answers exists, mark correct/incorrect
-                for p, ans_id in QuizRoomConsumer.rooms_answers[
-                    self.room_group_name
-                ].items():
-                    correct = False
-                    if question_answers:
-                        correct = question_answers.get(ans_id, False)
-                    results[p] = correct
+                for p, info in self.rooms_answers[self.room_group_name].items():
+                    ans_id = info["answer_id"]
+                    pts = info["points"]
+                    results[p] = {"correct": answer_id, "points": pts}
 
+                # Send results to all players
                 await self.channel_layer.group_send(
-                    self.room_group_name,
-                    {
-                        "type": "question_end",
-                        "results": QuizRoomConsumer.rooms_answers[self.room_group_name],
-                    },
+                    self.room_group_name, {"type": "question_end", "results": results}
                 )
+
+        elif action == "start_quiz":
+            # Optional: you can broadcast question data to all players
+            question_data = data.get("question_data", {})
+            await self.channel_layer.group_send(
+                self.room_group_name,
+                {"type": "question_update", "payload": question_data},
+            )
+            # Reset previous answers
+            self.rooms_answers[self.room_group_name] = {}
+
+    # ---------------- Handlers for group messages ---------------- #
 
     async def player_count_update(self, event):
         await self.send(
@@ -112,14 +89,8 @@ class QuizRoomConsumer(AsyncWebsocketConsumer):
         )
 
     async def question_update(self, event):
-        payload = event["payload"]
         await self.send(
-            text_data=json.dumps({"type": "question_update", "data": payload})
-        )
-
-    async def question_end(self, event):
-        await self.send(
-            text_data=json.dumps({"type": "question_end", "results": event["results"]})
+            text_data=json.dumps({"type": "question_update", "data": event["payload"]})
         )
 
     async def question_end(self, event):

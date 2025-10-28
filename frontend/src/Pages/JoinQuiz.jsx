@@ -1,9 +1,10 @@
 import { useState, useRef, useEffect } from "react";
+import Navbar from "../Components/Navbar";
+import Footer from "../Components/Footer";
 
 export default function JoinRoom() {
   const [username, setUsername] = useState("");
   const [code, setCode] = useState("");
-  const [players, setPlayers] = useState(0);
   const [currentQuestion, setCurrentQuestion] = useState(null);
   const [joined, setJoined] = useState(false);
   const [quizStarted, setQuizStarted] = useState(false);
@@ -11,8 +12,11 @@ export default function JoinRoom() {
   const [waiting, setWaiting] = useState(false);
   const [results, setResults] = useState([]);
   const [timeLeft, setTimeLeft] = useState(0);
+  const [points, setPoints] = useState(0); // player -> points
   const wsRef = useRef(null);
   const timerRef = useRef(null);
+  const questionStartTimeRef = useRef(null);
+
 
   const joinRoom = () => {
     if (!username) return alert("Enter username first!");
@@ -21,12 +25,19 @@ export default function JoinRoom() {
     const ws = new WebSocket(`ws://127.0.0.1:8000/ws/quiz/${code}/`);
     wsRef.current = ws;
 
-    ws.onopen = () => console.log("Connected to room:", code);
+    ws.onopen = () => {
+      ws.send(JSON.stringify({ action: "join_room", player: username }));
+    };
 
     ws.onmessage = (e) => {
       const data = JSON.parse(e.data);
 
-      if (data.type === "player_count") setPlayers(data.count);
+      if (data.type === "error") {
+        alert(data.message || "Room does not exist");
+        ws.close();
+        wsRef.current = null;
+        return;
+      }
 
       if (data.type === "question_update") {
         setCurrentQuestion(data.data);
@@ -34,6 +45,7 @@ export default function JoinRoom() {
         setHasAnswered(false);
         setWaiting(false);
         setResults([]);
+        questionStartTimeRef.current = Date.now();
         if (data.data.time_limit) startTimer(data.data.time_limit);
       }
 
@@ -42,10 +54,12 @@ export default function JoinRoom() {
         setResults(data.results || []);
         setHasAnswered(true);
         clearInterval(timerRef.current);
+
       }
+
     };
 
-    ws.onclose = () => console.log("Disconnected");
+    ws.onclose = () => { };
 
     setJoined(true);
   };
@@ -54,7 +68,7 @@ export default function JoinRoom() {
     setTimeLeft(duration);
     clearInterval(timerRef.current);
     timerRef.current = setInterval(() => {
-      setTimeLeft(prev => {
+      setTimeLeft((prev) => {
         if (prev <= 1) {
           clearInterval(timerRef.current);
           setHasAnswered(true);
@@ -66,81 +80,104 @@ export default function JoinRoom() {
     }, 1000);
   };
 
-  const selectAnswer = (answerId) => {
+  const selectAnswer = (isCorrect) => {
     if (hasAnswered) return;
+
+    let earnedPoints = 0;
+
+    if (currentQuestion.time_limit && isCorrect) {
+      const elapsedMs = Date.now() - questionStartTimeRef.current;
+      const remainingTimeMs = currentQuestion.time_limit * 1000 - elapsedMs;
+      earnedPoints = Math.max(Math.floor(remainingTimeMs), 0) * 0.1;
+    }
+
+    const totalPoints = points + Math.floor(earnedPoints);
+
+    // send the correct total
     wsRef.current.send(JSON.stringify({
       action: "answer_selected",
       player: username,
-      answer_id: answerId,
+      answer_id: isCorrect,
+      points: totalPoints
     }));
+
+    // now update local state
+    setPoints(totalPoints);
+
+
     setHasAnswered(true);
     setWaiting(true);
   };
 
-  useEffect(() => () => wsRef.current?.close(), []);
+  useEffect(() => {
+    return () => wsRef.current?.close();
+  }, []);
 
   return (
-    <div className="p-4 flex flex-col items-center justify-center space-y-4">
-      {!joined && !quizStarted && (
-        <div className="flex flex-col space-y-2 items-center">
-          <input
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            placeholder="Enter username"
-            className="border px-2 py-1"
-          />
-          <input
-            value={code}
-            onChange={(e) => setCode(e.target.value)}
-            placeholder="Enter room code"
-            className="border px-2 py-1"
-          />
-          <button onClick={joinRoom} className="bg-blue-600 text-white px-4 py-1 rounded">
-            Join Room
-          </button>
-        </div>
-      )}
+    <div className="flex flex-col justify-between min-h-screen bg-linear-to-r from-gray-700 to-gray-900 text-white">
+      <Navbar />
+      <div className="p-4 flex flex-col items-center justify-center space-y-4">
 
-      {quizStarted && !currentQuestion && (
-        <p className="text-yellow-400 text-xl">Quiz has started! Cannot join now.</p>
-      )}
+        {!joined && !quizStarted && (
+          <div className="flex flex-col space-y-5 items-center">
+            <p className="text-4xl font-bold">Join Quiz!</p>
+            <input
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder="Enter username"
+              className="border px-5 py-3 rounded-2xl bg-gray-950"
+            />
+            <input
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              placeholder="Enter room code"
+              className="border px-5 py-3 rounded-2xl bg-gray-950"
+            />
+            <button
+              onClick={joinRoom}
+              className="text-white px-6 py-2 bg-green-600 hover:bg-green-700 rounded hover:cursor-pointer"
+            >
+              Join Room
+            </button>
+          </div>
+        )}
 
-      <p>Players: {players}</p>
+        {!quizStarted && joined && (
+          <p className="text-yellow-400 text-xl">Waiting for the start...</p>
+        )}
 
-      {currentQuestion && (
-        <div className="mt-4 w-96">
-          <p className="text-xl font-bold mb-2">{currentQuestion.question}</p>
-          <p className="text-yellow-400 mb-2">Time Left: {timeLeft}s</p>
+        {quizStarted && !currentQuestion && (
+          <p className="text-yellow-400 text-xl">Quiz has started! Cannot join now.</p>
+        )}
 
-          {!results.length && (
-            <div className="grid grid-cols-2 gap-2">
-              {currentQuestion.answers.map((a, idx) => (
-                <button
-                  key={`${a.id}-${idx}`}
-                  className={`p-4 text-white font-bold rounded ${a.colorClass || "bg-gray-500"}`}
-                  onClick={() => selectAnswer(a.id)}
-                  disabled={hasAnswered}
-                >
-                  {a.answer}
-                </button>
-              ))}
-            </div>
-          )}
+        {currentQuestion && (
+          <div className="mt-4 w-96">
+            <p className="text-green-400 font-bold text-2xl">
+              Your Points: {points}
+            </p>
+            <p className="text-yellow-400 mb-2 text-xl">Time Left: {timeLeft}s</p>
 
-          {waiting && <p className="text-yellow-300 mt-2">Waiting for other players...</p>}
+            {!results.length && (
+              <div className="grid grid-cols-2 gap-2">
+                {currentQuestion.answers.map((a, idx) => (
+                  <button
+                    key={`${a.id}-${idx}`}
+                    className={`p-4 text-white font-bold rounded py-6 hover:cursor-pointer ${a.colorClass || "bg-gray-500"}`}
+                    onClick={() => selectAnswer(a.is_correct)}
+                    disabled={hasAnswered}
+                  >
+                    {a.answer}
+                  </button>
+                ))}
+              </div>
+            )}
 
-          {results.length > 0 && (
-            <div className="mt-4">
-              <p className="font-bold mb-2">Results:</p>
-              {Object.entries(results).map(([player, ans], idx) => (
-                <p key={idx} className={ans.is_correct ? "text-green-400" : "text-red-400"}>
-                  {player} chose: {ans.answer} {ans.is_correct ? "(Correct)" : "(Wrong)"}
-                </p>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+            {waiting && <p className="text-yellow-300 mt-2">Waiting for other players...</p>}
+          </div>
+        )}
+
+      </div>
+      <Footer />
     </div>
   );
 }
