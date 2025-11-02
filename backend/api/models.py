@@ -10,14 +10,14 @@ class Quizzes(models.Model):
 
 
 class Questions(models.Model):
-    question = models.CharField(max_length=40)
+    question = models.CharField(max_length=80)
     quiz_id = models.ForeignKey(
         Quizzes, on_delete=models.CASCADE, related_name="questions"
     )  # related_name added
 
 
 class Answer(models.Model):
-    answer = models.CharField(max_length=20)
+    answer = models.CharField(max_length=60)
     question_id = models.ForeignKey(
         Questions, on_delete=models.CASCADE, related_name="answers"
     )  # related_name added

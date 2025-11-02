@@ -40,4 +40,3 @@ class QuizzesSerializer(serializers.ModelSerializer):
             for answer_data in answers_data:
                 models.Answer.objects.create(question_id=question, **answer_data)
         return quiz
-        return quiz

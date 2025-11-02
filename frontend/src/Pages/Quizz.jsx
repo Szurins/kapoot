@@ -3,6 +3,7 @@ import axios from "axios";
 import { useEffect, useState, useRef } from "react";
 import Navbar from "../Components/Navbar";
 import Footer from "../Components/Footer";
+import Scoreboard from "../Components/Scoreboard";
 
 function Quiz() {
   const { id } = useParams();
@@ -14,10 +15,18 @@ function Quiz() {
   const [timeLeft, setTimeLeft] = useState(0);
   const [playerAnswers, setPlayerAnswers] = useState({});
   const [questionResults, setQuestionResults] = useState(null);
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [quizFinished, setQuizFinished] = useState(false);
   const socketRef = useRef(null);
   const timerRef = useRef(null);
+  const [playerList, setPlayerList] = useState([]);
 
-  const colors = ["bg-red-500 hover:bg-red-600", "bg-blue-500 hover:bg-blue-600", "bg-green-500 hover:bg-green-700", "bg-yellow-500 hover:bg-yellow-700"];
+  const colors = [
+    "bg-red-500 hover:bg-red-600",
+    "bg-blue-500 hover:bg-blue-600",
+    "bg-green-500 hover:bg-green-700",
+    "bg-yellow-500 hover:bg-yellow-700",
+  ];
 
   // Fetch quiz data
   useEffect(() => {
@@ -44,7 +53,10 @@ function Quiz() {
       ws.onmessage = (event) => {
         const data = JSON.parse(event.data);
 
-        if (data.type === "player_count") setPlayers(data.count);
+        if (data.type === "player_count") {
+          setPlayers(data.count);
+          setPlayerList(data.players || []);
+        }
 
         if (data.type === "question_update") {
           setCurrentQuestion(data.data);
@@ -54,20 +66,19 @@ function Quiz() {
         }
 
         if (data.type === "answer_selected") {
-          setPlayerAnswers(prev => ({ ...prev, [data.player]: data.is_correct, points: data.points }));
-          console.log("Answer selected:", data);
+          setPlayerAnswers((prev) => ({
+            ...prev,
+            [data.player]: data.is_correct,
+            points: data.points,
+          }));
         }
-
 
         if (data.type === "question_end") {
           setQuestionResults(data.results);
-          console.log(data);
-
           clearInterval(timerRef.current);
           setTimeLeft(0);
         }
       };
-
     };
 
     createRoom();
@@ -82,38 +93,36 @@ function Quiz() {
     setTimeLeft(duration);
     clearInterval(timerRef.current);
     timerRef.current = setInterval(() => {
-      setTimeLeft(prev => (prev > 0 ? prev - 1 : 0));
+      setTimeLeft((prev) => (prev > 0 ? prev - 1 : 0));
     }, 1000);
   };
 
   const startQuiz = () => {
     if (!socketRef.current || !quiz.questions?.length) return;
-
     const question = quiz.questions[0];
-    const payload = {
-      question: question?.question || "No question defined",
-      answers: question.answers.map((a, idx) => ({
-        id: a.id,
-        answer: a.answer,
-        colorClass: colors[idx % colors.length],
-        is_correct: a.is_correct,
-      })),
-      time_limit: 10,
-    };
-    socketRef.current.send(JSON.stringify({ action: "start_quiz", question_data: payload }));
-    setCurrentQuestion(payload);
+    sendQuestion(question);
     setStarted(true);
-    setRoomCode("");
-    startTimer(10);
+    setCurrentIndex(0);
   };
 
   const handleNextQuestion = () => {
     if (!socketRef.current) return;
 
-    // Find the next question based on currentQuestion index
-    const currentIndex = quiz.questions.findIndex(q => q.question === currentQuestion.question);
+    const nextIndex = currentIndex + 1;
 
-    const question = quiz.questions[currentIndex + 1];
+    // If no more questions, end quiz
+    if (nextIndex >= quiz.questions.length) {
+      setQuizFinished(true);
+      setCurrentQuestion(null);
+      return;
+    }
+
+    const question = quiz.questions[nextIndex];
+    sendQuestion(question);
+    setCurrentIndex(nextIndex);
+  };
+
+  const sendQuestion = (question) => {
     const payload = {
       question: question?.question || "No question defined",
       answers: question.answers.map((a, idx) => ({
@@ -126,11 +135,9 @@ function Quiz() {
     };
     socketRef.current.send(JSON.stringify({ action: "start_quiz", question_data: payload }));
     setCurrentQuestion(payload);
-    setStarted(true);
-    setRoomCode("");
+    setQuestionResults(null);
     startTimer(10);
   };
-
 
   return (
     <div className="flex flex-col justify-between min-h-screen bg-gradient-to-r from-gray-700 to-gray-900 text-white">
@@ -139,31 +146,44 @@ function Quiz() {
       <main className="flex-1 flex flex-col items-center justify-center space-y-4 text-center">
         <p className="text-4xl font-bold">{quiz.name}</p>
 
-        {!started && roomCode && (
+        {!started && roomCode && !quizFinished && (
           <p className="text-2xl">
             Room Code: <span className="font-mono">{roomCode}</span>
           </p>
         )}
 
-        <p className="text-xl text-gray-300">Players Joined: {players}</p>
-
         {!started && (
+          <>
+            <p className="text-xl text-gray-300">
+              Players Joined: {players}
+            </p>
+
+            {playerList.length > 0 && (
+              <p className="text-gray-400">
+                {playerList.join(", ")}
+              </p>
+            )}
+          </>
+        )}
+
+
+
+
+        {!started && !quizFinished && (
           <button
             onClick={startQuiz}
             className="px-6 py-2 rounded bg-green-600 hover:bg-green-700 hover:pointer disabled:bg-gray-600 hover:cursor-pointer"
-            disabled={players === 0} // disable if no players
+            disabled={players === 0}
           >
             Start Quiz
           </button>
         )}
-
 
         {started && currentQuestion && (
           <div className="mt-4 w-96">
             <p className="text-xl font-bold mb-2">{currentQuestion.question}</p>
             <p className="text-yellow-400 mb-2">Time Left: {timeLeft}s</p>
 
-            {/* Host cannot click answers */}
             <div className="grid grid-cols-2 gap-2">
               {currentQuestion.answers.map((a, idx) => (
                 <div
@@ -185,18 +205,14 @@ function Quiz() {
               <div className="mt-4 p-4 border border-gray-500 rounded bg-gray-800">
                 <p className="font-bold text-lg mb-2">Results:</p>
                 {Object.entries(questionResults).map(([player, result], idx) => (
-                  <p key={idx} className={result.correct ? "text-green-400" : "text-red-400"}>
+                  <p key={idx} className="text-gray-300">
                     {player}: {result.points} pts
                   </p>
                 ))}
-                <p className="mt-2 font-bold">
-                  Correct Answers: {Object.values(questionResults).filter(v => v).length} / {players}
-                </p>
 
-                {/* Next Question Button */}
                 <button
-                  onClick={() => handleNextQuestion()}
-                  className="mt-4 px-4 py-2 rounded bg-blue-600 hover:bg-blue-700"
+                  onClick={handleNextQuestion}
+                  className="mt-4 px-4 py-2 rounded bg-blue-600 hover:bg-blue-700 hover:cursor-pointer"
                 >
                   Next Question
                 </button>
@@ -204,6 +220,8 @@ function Quiz() {
             )}
           </div>
         )}
+
+        {quizFinished && <Scoreboard results={questionResults || {}} />}
       </main>
 
       <Footer />

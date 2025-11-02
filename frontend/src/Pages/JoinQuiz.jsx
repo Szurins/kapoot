@@ -51,11 +51,20 @@ export default function JoinRoom() {
 
       if (data.type === "question_end") {
         setWaiting(false);
-        setResults(data.results || []);
-        setHasAnswered(true);
         clearInterval(timerRef.current);
+        setHasAnswered(true);
 
+        // Extract this player's result
+        const playerResult = data.results[username];
+
+        if (playerResult) {
+          setResults(playerResult); // store only this player's result
+          setPoints(playerResult.points);
+        } else {
+          console.warn("No result found for this player in results:", data.results);
+        }
       }
+
 
     };
 
@@ -71,7 +80,15 @@ export default function JoinRoom() {
       setTimeLeft((prev) => {
         if (prev <= 1) {
           clearInterval(timerRef.current);
-          setHasAnswered(true);
+          if (!hasAnswered) {
+            wsRef.current.send(JSON.stringify({
+              action: "answer_selected",
+              player: username,
+              answer_id: false,
+              points: points
+            }));
+            setHasAnswered(true);
+          }
           setWaiting(false);
           return 0;
         }
@@ -79,6 +96,7 @@ export default function JoinRoom() {
       });
     }, 1000);
   };
+
 
   const selectAnswer = (isCorrect) => {
     if (hasAnswered) return;

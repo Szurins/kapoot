@@ -33,12 +33,13 @@ class QuizRoomConsumer(AsyncWebsocketConsumer):
             player = data.get("player")
             self.rooms_players[self.room_group_name].add(player)
 
-            # Notify all clients about player count
+            # Notify all clients about player count and names
             await self.channel_layer.group_send(
                 self.room_group_name,
                 {
                     "type": "player_count_update",
                     "count": len(self.rooms_players[self.room_group_name]),
+                    "players": list(self.rooms_players[self.room_group_name]),
                 },
             )
 
@@ -85,7 +86,13 @@ class QuizRoomConsumer(AsyncWebsocketConsumer):
 
     async def player_count_update(self, event):
         await self.send(
-            text_data=json.dumps({"type": "player_count", "count": event["count"]})
+            text_data=json.dumps(
+                {
+                    "type": "player_count",
+                    "count": event["count"],
+                    "players": event.get("players", []),
+                }
+            )
         )
 
     async def question_update(self, event):
